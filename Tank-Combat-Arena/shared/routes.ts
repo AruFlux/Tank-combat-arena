@@ -1,0 +1,37 @@
+import { z } from 'zod';
+import { insertScoreSchema, scores } from './schema';
+
+export const errorSchemas = {
+  validation: z.object({
+    message: z.string(),
+    field: z.string().optional(),
+  }),
+  internal: z.object({
+    message: z.string(),
+  }),
+};
+
+export const api = {
+  scores: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/scores' as const,
+      responses: {
+        200: z.array(z.custom<typeof scores.$inferSelect>()),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/scores' as const,
+      input: insertScoreSchema,
+      responses: {
+        201: z.custom<typeof scores.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+  },
+};
+
+export type ScoreInput = z.infer<typeof api.scores.create.input>;
+export type ScoreResponse = z.infer<typeof api.scores.create.responses[201]>;
+export type ScoresListResponse = z.infer<typeof api.scores.list.responses[200]>;

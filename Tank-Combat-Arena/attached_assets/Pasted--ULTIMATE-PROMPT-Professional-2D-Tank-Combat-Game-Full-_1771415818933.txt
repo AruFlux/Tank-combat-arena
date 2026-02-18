@@ -1,0 +1,820 @@
+# **ULTIMATE PROMPT: Professional 2D Tank Combat Game – Full Production Build**
+
+I need you to act as a senior game development engineer and build a **complete, production-ready 2D top-down tank combat game** using HTML, CSS, and JavaScript. This must run entirely in Replit's browser preview at a smooth 60 FPS.
+
+## **CRITICAL REQUIREMENTS**
+
+This is **NOT** a simple arcade game. Build a **realistic military tank simulation** with deep mechanics, tactical AI, and professional-grade code architecture.
+
+---
+
+## **PART 1: GAME ARCHITECTURE**
+
+### **Folder Structure (MUST FOLLOW EXACTLY)**
+```
+/tank-game
+├── index.html
+├── style.css
+├── main.js
+├── /core
+│   ├── GameEngine.js
+│   ├── Config.js
+│   ├── Constants.js
+│   └── Utils.js
+├── /entities
+│   ├── Tank.js
+│   ├── PlayerTank.js
+│   ├── EnemyTank.js
+│   ├── Projectile.js
+│   └── Module.js
+├── /systems
+│   ├── AISystem.js
+│   ├── DamageSystem.js
+│   ├── PenetrationSystem.js
+│   ├── PhysicsEngine.js
+│   ├── ParticleSystem.js
+│   ├── MapSystem.js
+│   └── UIManager.js
+├── /components
+│   ├── Crew.js
+│   ├── Weapon.js
+│   ├── Armor.js
+│   └── Engine.js
+├── /ai
+│   ├── BehaviorTree.js
+│   ├── TacticalAI.js
+│   ├── Pathfinding.js
+│   └── CoverSystem.js
+└── /utils
+    ├── ObjectPool.js
+    ├── SpatialGrid.js
+    └── MathHelpers.js
+```
+
+### **Code Standards**
+- **ES6+ syntax** with proper modularization
+- **JSDoc comments** for all classes and methods
+- **No external dependencies** (vanilla JS only)
+- **Separation of concerns** (update vs render)
+- **Object pooling** for performance
+- **Delta-time based** movement
+- **RequestAnimationFrame** game loop
+- **Web Workers** for AI if needed
+
+---
+
+## **PART 2: GAME FEATURES (IMPLEMENT ALL)**
+
+### **1. ENEMY AI SYSTEM – ADVANCED TACTICAL BEHAVIOR**
+
+**Detection & Awareness:**
+- **Detection radius:** 600m visual, 400m engagement
+- **Field of view cone:** 120° forward arc
+- **Reaction delay:** 0.5-2.0s based on commander status
+- **Last known position tracking** (10s memory)
+- **Sound detection:** gunfire reveals position for 3s
+
+**Behavior States (with transitions):**
+```
+PATROL → (spot player) → HUNT
+HUNT → (LOS achieved) → ENGAGE
+ENGAGE → (low health) → RETREAT
+ENGAGE → (flank opportunity) → FLANK
+RETREAT → (health recovered) → REPOSITION
+REPOSITION → (no player) → PATROL
+```
+
+**Tactical Decision Making:**
+```javascript
+// AI must evaluate:
+- Current health percentage
+- Ammo remaining
+- Cover availability
+- Flanking routes
+- Team positioning (if multiple enemies)
+- Player's last known position
+- Time since last contact
+```
+
+**Combat Behavior:**
+- **Aim first, shoot second** – 0.3s stabilization delay
+- **Accuracy variance** based on:
+  - Distance (more spread at range)
+  - Crew skill (gunner accuracy)
+  - Movement (penalty while moving)
+  - Suppression (if under fire)
+- **Armor consideration** – aim for weak spots (LFP, turret ring)
+- **Cover usage** – seek cover when reloading
+- **Flanking** – attempt to get side/rear shots
+
+**Russian Bias Implementation:**
+- T-90M tanks have:
+  - 20% stronger frontal armor
+  - 15% more aggressive (push instead of retreat)
+  - 25% faster turret traverse
+  - 10% slower hull traverse
+  - 30% higher chance to fight to the death
+
+### **2. TANK VISUALS & ANIMATION**
+
+**Sprite Requirements:**
+- **Hull:** 60x40px with angled front slope
+- **Turret:** 40x30px ellipse, centered on hull
+- **Gun barrel:** 30px length, attached to turret center
+- **Track sections:** animated tread pattern when moving
+
+**Animation System:**
+```javascript
+// Recoil animation
+fire() {
+    this.recoilProgress = 1.0; // Start at max
+    this.recoilAmount = 10; // pixels
+}
+
+updateRecoil() {
+    this.recoilProgress *= 0.9; // Decay
+    // Barrel moves back then forward
+    this.barrelOffset = Math.sin(this.recoilProgress * Math.PI) * this.recoilAmount;
+}
+```
+
+**Track Marks:**
+- Spawn every 5px of movement
+- Fade over 300 frames
+- Maximum 1000 marks (object pooled)
+- Different textures for terrain types
+
+**Shadows:**
+- Dynamic based on "sun angle" (global variable)
+- Elliptical shadow under tank
+- Opacity: 0.3 + distance from ground effect
+- Blur: 5px Gaussian (simulated with multiple layers)
+
+### **3. BALLISTICS & PENETRATION SYSTEM**
+
+**Shell Types with Realistic Data:**
+```javascript
+const SHELLS = {
+    M829A3: { // APFSDS
+        caliber: 120,
+        penetration: 650, // mm RHA at 0m
+        velocity: 1550, // m/s
+        mass: 7.8, // kg
+        explosive: false,
+        dropoff: 0.05, // per 100m
+        damage: 80,
+        spall: true
+    },
+    M830: { // HEAT
+        caliber: 120,
+        penetration: 480,
+        velocity: 1140,
+        mass: 13.5,
+        explosive: true,
+        blastRadius: 50,
+        dropoff: 0.02,
+        damage: 120
+    },
+    M393: { // HESH
+        caliber: 120,
+        penetration: 127,
+        velocity: 730,
+        mass: 15.0,
+        explosive: true,
+        spall: true,
+        dropoff: 0.1,
+        damage: 150
+    },
+    M735: { // SABOT (105mm)
+        caliber: 105,
+        penetration: 400,
+        velocity: 1501,
+        mass: 5.8,
+        explosive: false,
+        dropoff: 0.04,
+        damage: 65
+    }
+};
+```
+
+**Penetration Formula:**
+```
+Effective Penetration = Base Penetration - (Distance/100 × Dropoff)
+
+Effective Armor = Armor Thickness / cos(Impact Angle)
+
+Penetration Chance = min(100, max(0, 
+    (Effective Penetration - Effective Armor × 0.8) / (Effective Armor × 0.4) × 100
+))
+
+If Penetration > Armor × 1.5 → Overmatch (+50% spall)
+If Impact Angle > 70° → Ricochet Chance = (Penetration/Armor) × 100
+```
+
+**Post-Penetration Effects:**
+- **Spall cone:** 30° angle, 20-50 fragments
+- **Spall damage:** 5-15 per fragment to crew/modules
+- **Explosive filler:** 50-150 AoE damage
+- **Fire chance:** based on module hit (engine: 40%, fuel: 70%)
+
+### **4. DAMAGE MODEL & MODULE SYSTEM**
+
+**Armor Layout (M1 Abrams):**
+```javascript
+this.armorZones = {
+    hullFrontUpper: { thickness: 600, angle: 45 },
+    hullFrontLower: { thickness: 400, angle: 30 },
+    hullSides: { thickness: 150, angle: 0 },
+    hullRear: { thickness: 80, angle: 0 },
+    turretFront: { thickness: 700, angle: 30 },
+    turretSides: { thickness: 300, angle: 15 },
+    turretRear: { thickness: 150, angle: 10 },
+    turretTop: { thickness: 70, angle: 0 }
+};
+```
+
+**Module System with Effects:**
+```javascript
+class TankModule {
+    constructor(name, maxHealth, location, effects) {
+        this.name = name;
+        this.health = maxHealth;
+        this.maxHealth = maxHealth;
+        this.location = location; // x,y offset from tank center
+        this.functional = true;
+        this.effects = effects; // { speed, turnRate, reload, accuracy }
+    }
+    
+    damage(amount) {
+        this.health = Math.max(0, this.health - amount);
+        if (this.health === 0) {
+            this.functional = false;
+            this.applyEffects();
+        }
+    }
+    
+    applyEffects() {
+        // Apply multipliers to tank stats
+        for (let [stat, multiplier] of Object.entries(this.effects)) {
+            this.tank[stat] *= multiplier;
+        }
+    }
+}
+```
+
+### **5. CREW SYSTEM WITH INJURIES**
+
+**Crew Roles:**
+```javascript
+class CrewMember {
+    constructor(role, skill = 0.8 + Math.random() * 0.4) {
+        this.role = role; // 'commander', 'gunner', 'loader', 'driver'
+        this.skill = skill;
+        this.health = 100;
+        this.isAlive = true;
+        this.isStunned = false;
+        this.stunDuration = 0;
+    }
+    
+    injure(damage) {
+        this.health -= damage;
+        
+        if (this.health <= 0) {
+            this.isAlive = false;
+            this.applyDeathPenalty();
+        } else if (this.health < 30 && !this.isStunned) {
+            this.isStunned = true;
+            this.stunDuration = 5; // seconds
+            this.applyStunPenalty();
+        }
+    }
+    
+    applyDeathPenalty() {
+        switch(this.role) {
+            case 'driver':
+                this.tank.maxSpeed *= 0.3;
+                this.tank.turnRate *= 0.2;
+                break;
+            case 'gunner':
+                this.tank.accuracy *= 0.2;
+                this.tank.turretTraverse *= 0.4;
+                break;
+            case 'loader':
+                this.tank.reloadTime *= 3.0;
+                break;
+            case 'commander':
+                this.tank.detectionRange *= 0.3;
+                this.tank.reactionTime *= 3.0;
+                this.tank.commRange = 0;
+                break;
+        }
+    }
+    
+    heal(amount) {
+        this.health = Math.min(100, this.health + amount);
+        if (this.health > 30) {
+            this.isStunned = false;
+            this.removePenalty();
+        }
+    }
+}
+```
+
+### **6. FIRE & REPAIR SYSTEM**
+
+**Fire Mechanics:**
+```javascript
+class Fire {
+    constructor(tank, location) {
+        this.tank = tank;
+        this.location = location; // 'engine', 'fuel', 'ammo'
+        this.intensity = 1.0;
+        this.spreadRate = 0.1; // per second
+        this.damageRate = 10; // per second
+    }
+    
+    update(deltaTime) {
+        // Deal damage
+        this.tank.health -= this.damageRate * deltaTime * this.intensity;
+        
+        // Damage specific module
+        if (this.location === 'engine') {
+            this.tank.modules.engine.health -= 15 * deltaTime;
+        } else if (this.location === 'fuel') {
+            this.tank.modules.fuel.health -= 20 * deltaTime;
+        }
+        
+        // Spread chance
+        if (Math.random() < this.spreadRate * deltaTime) {
+            this.spreadToAdjacent();
+        }
+        
+        // Generate smoke
+        for (let i = 0; i < this.intensity * 2; i++) {
+            this.tank.game.particleSystem.addSmoke(
+                this.tank.x + (Math.random() - 0.5) * 40,
+                this.tank.y + (Math.random() - 0.5) * 40,
+                'black',
+                50 + Math.random() * 50
+            );
+        }
+    }
+    
+    extinguish() {
+        if (this.tank.extinguisherUses > 0) {
+            this.intensity *= 0.3;
+            this.tank.extinguisherUses--;
+            if (this.intensity < 0.1) {
+                this.remove();
+            }
+        }
+    }
+}
+```
+
+**Repair System:**
+```javascript
+repair(moduleName) {
+    if (this.repairKits <= 0) return false;
+    if (this.isRepairing) return false;
+    
+    this.isRepairing = true;
+    this.repairProgress = 0;
+    this.repairTarget = moduleName;
+    this.repairDuration = 5; // seconds
+    
+    return true;
+}
+
+updateRepair(deltaTime) {
+    if (!this.isRepairing) return;
+    
+    this.repairProgress += deltaTime;
+    
+    // Interrupt if hit
+    if (this.wasHit) {
+        this.isRepairing = false;
+        this.repairProgress = 0;
+        this.game.ui.showMessage("REPAIR INTERRUPTED!", "warning");
+        return;
+    }
+    
+    if (this.repairProgress >= this.repairDuration) {
+        // Complete repair
+        const module = this.modules[this.repairTarget];
+        module.health = module.maxHealth;
+        module.functional = true;
+        
+        this.isRepairing = false;
+        this.repairKits--;
+        this.game.ui.showMessage("REPAIR COMPLETE", "success");
+    }
+}
+```
+
+### **7. WEAPON SYSTEMS**
+
+**Main Gun (120mm M256):**
+```javascript
+class MainGun extends Weapon {
+    constructor() {
+        super({
+            name: "M256 120mm",
+            caliber: 120,
+            reloadTime: 6.5,
+            accuracy: 0.95,
+            stabilization: 0.8,
+            ammoTypes: ['M829A3', 'M830', 'M393']
+        });
+    }
+    
+    fire(target) {
+        if (!this.isReady) return false;
+        
+        // Calculate accuracy penalty
+        let accuracyMod = this.baseAccuracy;
+        if (this.tank.isMoving) accuracyMod *= this.stabilization;
+        accuracyMod *= this.tank.crew.gunner.skill;
+        
+        // Spread based on accuracy
+        const spread = (1 - accuracyMod) * 0.1;
+        const actualAngle = this.tank.turretAngle + (Math.random() - 0.5) * spread;
+        
+        // Create projectile
+        const shell = this.selectAmmo();
+        const projectile = new Projectile(
+            this.tank.x, this.tank.y,
+            actualAngle,
+            shell
+        );
+        
+        this.tank.game.addProjectile(projectile);
+        this.startReload();
+        
+        return true;
+    }
+}
+```
+
+**Coaxial MG (7.62mm M240):**
+- 1000 rounds
+- Overheat after 100 continuous rounds
+- 15mm penetration (light vehicles only)
+- Cooldown: 5 seconds when overheated
+
+**Top-mounted MG (.50 cal M2HB):**
+- 500 rounds
+- Anti-air capability
+- 30mm penetration
+- Manual or automatic targeting
+
+**Smoke Grenades:**
+- 8 launchers
+- 3s deployment time
+- 15s smoke screen duration
+- Blocks LOS completely
+
+### **8. MAP SYSTEM & TERRAIN**
+
+**Terrain Types with Effects:**
+```javascript
+const TERRAIN_TYPES = {
+    OPEN: {
+        speed: 1.0,
+        cover: 0.0,
+        concealment: 0.0,
+        traction: 1.0,
+        color: '#3a6a3a'
+    },
+    FOREST: {
+        speed: 0.5,
+        cover: 0.4,
+        concealment: 0.7,
+        traction: 0.7,
+        color: '#2a5a2a'
+    },
+    ROAD: {
+        speed: 1.3,
+        cover: 0.0,
+        concealment: 0.0,
+        traction: 1.2,
+        color: '#4a4a4a'
+    },
+    WATER: {
+        speed: 0.2,
+        cover: 0.0,
+        concealment: 0.0,
+        traction: 0.1,
+        passable: false,
+        color: '#2a4a6a'
+    },
+    MARSH: {
+        speed: 0.3,
+        cover: 0.2,
+        concealment: 0.3,
+        traction: 0.3,
+        color: '#3a5a3a'
+    },
+    URBAN: {
+        speed: 0.7,
+        cover: 0.8,
+        concealment: 0.5,
+        traction: 0.9,
+        color: '#5a5a5a'
+    }
+};
+```
+
+**Map Objects:**
+```javascript
+class MapObject {
+    constructor(x, y, type) {
+        this.type = type; // 'building', 'wall', 'tree', 'rock', 'hedge'
+        this.destructible = true;
+        this.penetrable = false;
+        this.health = 500;
+        this.coverValue = 0.8;
+        this.concealmentValue = 0.9;
+        this.size = { width: 100, height: 80 };
+        this.position = { x, y };
+    }
+    
+    onHit(projectile) {
+        if (!this.destructible) return false;
+        
+        if (projectile.penetration > 100) {
+            this.health -= projectile.damage;
+            
+            if (this.health <= 0) {
+                this.destroy();
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    destroy() {
+        // Remove from map
+        this.game.mapSystem.removeObject(this);
+        
+        // Add destruction effect
+        this.game.particleSystem.addLargeExplosion(
+            this.position.x, 
+            this.position.y
+        );
+    }
+}
+```
+
+**Collision Optimization:**
+- **Spatial grid** with 100x100 pixel cells
+- **Only check cells within tank radius + margin**
+- **Ray casting** with early exit for LOS
+- **Quadtree** for large maps (optional)
+
+### **9. GUI & HUD – MILITARY TACTICAL THEME**
+
+**Layout Specifications:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ [12:34] ⚠️ MODERATE THREAT        [🔫42] [💥30] [💣20] [🔥2] │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│                                                             │
+│                    GAME CANVAS (MAIN VIEW)                  │
+│                                                             │
+│                                                             │
+├───────────────┬─────────────────────────────┬───────────────┤
+│ HULL: ████████│                             │   MINIMAP     │
+│ TURRET:██████ │       FIRE CONTROL          │   ┌────────┐  │
+│ ENGINE:█████  │   [APFSDS] [HEAT] [HESH]    │   │        │  │
+│ AMMO: ███████ │    RELOAD: ████████ 6.2s    │   │   ●    │  │
+│ TRACKS: █████ │    MG HEAT: ███░░░░░ 30%    │   │  ▲     │  │
+├───────────────┼─────────────────────────────┼───┴────────┴──┤
+│ CREW:         │ DAMAGE LOG:                  │ CONTROLS:     │
+│ ● CDR [100%]  │ > Armor Penetrated!          │ WASD - Move   │
+│ ● GNR [85%]   │ > Loader Injured             │ Mouse - Aim   │
+│ ○ LDR [0%]    │ > Engine Damaged             │ LMB - Fire    │
+│ ● DRV [100%]  │ > Fire in Engine!            │ RMB - MG      │
+└───────────────┴──────────────────────────────┴───────────────┘
+```
+
+**Interactive Elements:**
+- **Clickable ammo slots** with keyboard shortcuts (1,2,3)
+- **Crew portraits** with health bars
+- **Damage feed** with color coding (red=critical, yellow=damage)
+- **Minimap** with pan/zoom (mouse wheel)
+- **Hit indicator** showing direction of incoming fire
+- **Repair progress bar** when repairing
+- **Fire warning** with extinguisher button
+
+### **10. PERFORMANCE OPTIMIZATION**
+
+**Object Pool Implementation:**
+```javascript
+class ObjectPool {
+    constructor(createFn, maxSize = 1000) {
+        this.createFn = createFn;
+        this.maxSize = maxSize;
+        this.pool = [];
+        this.active = new Set();
+    }
+    
+    acquire(...args) {
+        let obj;
+        
+        if (this.pool.length > 0) {
+            obj = this.pool.pop();
+            obj.reset(...args);
+        } else if (this.active.size < this.maxSize) {
+            obj = this.createFn(...args);
+        } else {
+            // Reuse oldest active object
+            const [oldest] = this.active.values();
+            this.active.delete(oldest);
+            oldest.reset(...args);
+            obj = oldest;
+        }
+        
+        this.active.add(obj);
+        return obj;
+    }
+    
+    release(obj) {
+        this.active.delete(obj);
+        if (this.pool.length < this.maxSize) {
+            this.pool.push(obj);
+        }
+    }
+}
+```
+
+**Delta-Time Movement:**
+```javascript
+update(deltaTime) {
+    // deltaTime = 1.0 = 60fps
+    const moveSpeed = this.maxSpeed * deltaTime * 0.1;
+    this.x += Math.cos(this.angle) * moveSpeed;
+    this.y += Math.sin(this.angle) * moveSpeed;
+    
+    // Update turret
+    const turnSpeed = this.turretTraverse * deltaTime * 0.1;
+    this.turretAngle = this.rotateTowards(
+        this.turretAngle,
+        this.targetTurretAngle,
+        turnSpeed
+    );
+}
+```
+
+**Spatial Grid for Collision:**
+```javascript
+class SpatialGrid {
+    constructor(cellSize = 100) {
+        this.cellSize = cellSize;
+        this.grid = new Map();
+    }
+    
+    insert(entity) {
+        const cellX = Math.floor(entity.x / this.cellSize);
+        const cellY = Math.floor(entity.y / this.cellSize);
+        const key = `${cellX},${cellY}`;
+        
+        if (!this.grid.has(key)) {
+            this.grid.set(key, new Set());
+        }
+        this.grid.get(key).add(entity);
+    }
+    
+    queryRange(x, y, radius) {
+        const results = [];
+        const minCellX = Math.floor((x - radius) / this.cellSize);
+        const maxCellX = Math.floor((x + radius) / this.cellSize);
+        const minCellY = Math.floor((y - radius) / this.cellSize);
+        const maxCellY = Math.floor((y + radius) / this.cellSize);
+        
+        for (let cx = minCellX; cx <= maxCellX; cx++) {
+            for (let cy = minCellY; cy <= maxCellY; cy++) {
+                const key = `${cx},${cy}`;
+                const cell = this.grid.get(key);
+                if (cell) {
+                    results.push(...cell);
+                }
+            }
+        }
+        
+        return results;
+    }
+}
+```
+
+---
+
+## **PART 3: DELIVERABLES**
+
+You must provide:
+
+### **1. Complete Code Files**
+- All files listed in folder structure
+- Each file fully implemented with JSDoc comments
+- No placeholder or "TODO" comments
+- Production-ready, error-free code
+
+### **2. Running Instructions**
+```markdown
+# HOW TO RUN
+1. Open Replit
+2. Create new HTML/CSS/JS project
+3. Copy all files into the correct folders
+4. Click "Run"
+5. Game starts automatically
+
+# CONTROLS
+- W/A/S/D or Arrow Keys: Move tank
+- Mouse: Aim turret
+- Left Click: Fire main gun
+- Right Click: Fire coaxial MG
+- 1/2/3: Switch ammo types
+- R: Start repair
+- F: Use fire extinguisher
+- Space: Brake
+- Tab: Show minimap
+- P: Pause game
+```
+
+### **3. Architecture Documentation**
+```
+GAME ARCHITECTURE
+├── Core Loop: GameEngine.js manages update/render cycles
+├── Entity System: All game objects inherit from BaseEntity
+├── Component System: Tank composed of Crew, Weapon, Armor
+├── AI System: Behavior trees for tactical decisions
+├── Physics: Spatial grid for collision optimization
+├── Particles: Object pooling for effects
+└── UI: DOM-based with canvas overlay for minimap
+```
+
+### **4. AI Behavior Documentation**
+```
+AI STATE MACHINE
+- PATROL: Move between waypoints, 120° scan
+- ALERT: Investigate last known position
+- HUNT: Search with bounding overwatch
+- ENGAGE: Combat with proper aiming
+- FLANK: Attempt side/rear attack
+- RETREAT: Fall back using smoke
+- REPOSITION: Move to new cover
+```
+
+### **5. Damage Formula Documentation**
+```
+PENETRATION CALCULATION
+1. Base penetration - distance dropoff
+2. Angle multiplier = 1 / cos(impactAngle)
+3. Effective armor = armor thickness × angle multiplier
+4. If penetration > effective armor: PENETRATED
+5. If overmatch (pen > armor × 1.5): +50% damage
+6. If angle > 70°: ricochet check
+
+DAMAGE CALCULATION
+- Spall fragments: 20-50 pieces, 30° cone
+- Module damage: 20-80 based on hit location
+- Crew injury: 30-70 damage, stun if <30 HP
+- Fire chance: 40% engine, 70% fuel
+```
+
+---
+
+## **FINAL REQUIREMENTS**
+
+**The game MUST:**
+- Run at 60 FPS on modern browsers
+- Be fully playable immediately after loading
+- Have all features implemented (no placeholders)
+- Use proper modular architecture
+- Include all visual effects (smoke, fire, tracks)
+- Have working AI that behaves tactically
+- Include complete damage and crew systems
+- Have a functional UI with all displays
+- Support multiple enemy tanks
+- Include terrain and destructible objects
+
+**DO NOT:**
+- Use any external libraries or frameworks
+- Leave console.log statements in production code
+- Have memory leaks (test for 30 minutes play)
+- Simplify AI to basic behaviors
+- Skip any requested features
+- Provide incomplete or placeholder code
+
+**The code must be production-ready, meaning:**
+- No syntax errors
+- All variables defined
+- All functions implemented
+- Proper error handling
+- Performance optimized
+- Mobile responsive (optional but bonus)
+
+---
+
+**BEGIN IMPLEMENTATION. DELIVER THE COMPLETE GAME WITH ALL FILES AND FEATURES ABOVE.**
